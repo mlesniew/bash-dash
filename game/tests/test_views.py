@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from challenges import catalog, sandbox
 from game import services, views
-from game.models import GameSession
+from game.models import GameSession, GameTicket
 from game.templatetags.game_text import render_description
 from game.tests.fakes import result
 
@@ -34,7 +34,13 @@ class ViewTestCase(TestCase):
         self.order = catalog.main_set()
 
     def start(self, nick='neo'):
-        return self.client.post(reverse('game:start'), {'nick': nick, 't': services.issue_start_token()})
+        if views.TICKET_SESSION_KEY not in self.client.session:
+            self.client.get(reverse('game:home'), {'t': services.issue_start_token()})
+        return self.client.post(reverse('game:start'), {'nick': nick})
+
+    def ticket(self, client=None):
+        client = client or self.client
+        return GameTicket.objects.get(pk=client.session[views.TICKET_SESSION_KEY])
 
     def game(self):
         return GameSession.objects.get(pk=self.client.session['game_id'])
@@ -80,13 +86,14 @@ class HomeAndStartTests(ViewTestCase):
         self.assertEqual(GameSession.objects.count(), 0)
         self.assertNotIn('game_id', self.client.session)
 
-    def test_start_with_rule_breaking_nick_shows_rule_and_keeps_input_and_token(self):
-        token = services.issue_start_token()
-        resp = self.client.post(reverse('game:start'), {'nick': 'bad nick!', 't': token})
+    def test_start_with_rule_breaking_nick_shows_rule_and_keeps_input_and_ticket(self):
+        self.client.get(reverse('game:home'), {'t': services.issue_start_token()})
+        ticket = self.ticket()
+        resp = self.client.post(reverse('game:start'), {'nick': 'bad nick!'})
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, f'Use 1-{services.NICK_MAX_CHARS} {services.NICK_CHARS_DESC} (no spaces).')
         self.assertContains(resp, 'value="bad nick!"')
-        self.assertContains(resp, f'name="t" value="{token}"')
+        self.assertEqual(self.ticket().pk, ticket.pk)
         self.assertEqual(GameSession.objects.count(), 0)
         self.assertNotIn('game_id', self.client.session)
 
@@ -101,17 +108,27 @@ class GateTests(ViewTestCase):
     def expired_token(self):
         return services.issue_start_token(timezone.now() - timedelta(seconds=services.gate_settings().token_ttl_s + 120))
 
-    def test_home_without_token_is_refused(self):
+    def test_home_without_token_offers_game_code_entry(self):
         resp = self.client.get(reverse('game:home'))
-        self.assertEqual(resp.status_code, 403)
-        self.assertContains(resp, 'Scan the QR code at the booth to play', status_code=403)
-        self.assertNotContains(resp, 'name="nick"', status_code=403)
-        self.assertNotContains(resp, 'has expired', status_code=403)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Continue on this computer')
+        self.assertContains(resp, 'name="code"')
+        self.assertNotContains(resp, 'name="nick"')
 
-    def test_refusal_page_has_manual_code_form(self):
+    def test_join_accepts_manual_six_digit_gate_code(self):
+        token = services.issue_start_token()
+        resp = self.client.post(reverse('game:join'), {'code': f'{token[:3]} {token[3:]}'})
+        self.assertRedirects(resp, reverse('game:home'))
         resp = self.client.get(reverse('game:home'))
+        self.assertContains(resp, 'name="nick"')
+        self.assertNotContains(resp, 'Use a computer for the best chance at a high score')
+        self.assertNotContains(resp, 'Or continue here')
+        self.assertEqual(GameTicket.objects.count(), 1)
+
+    def test_invalid_qr_refusal_page_has_manual_gate_code_form(self):
+        bad = '000000' if services.issue_start_token() != '000000' else '111111'
+        resp = self.client.get(reverse('game:home'), {'t': bad})
         self.assertContains(resp, 'name="t"', status_code=403)
-        self.assertContains(resp, 'method="get"', status_code=403)
 
     def test_home_with_wrong_code_says_invalid(self):
         resp = self.client.get(reverse('game:home'), {'t': '000000' if services.issue_start_token() != '000000' else '111111'})
@@ -119,41 +136,47 @@ class GateTests(ViewTestCase):
 
     def test_manually_typed_code_with_space_opens_form(self):
         token = services.issue_start_token()
-        resp = self.client.get(reverse('game:home'), {'t': f'{token[:3]} {token[3:]}'})
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f'name="t" value="{token}"')
+        resp = self.client.post(reverse('game:join'), {'code': f'{token[:3]} {token[3:]}'}, follow=True)
+        self.assertContains(resp, 'name="nick"')
 
     def test_home_with_expired_token_says_expired(self):
         resp = self.client.get(reverse('game:home'), {'t': self.expired_token()})
         self.assertContains(resp, 'That code has expired.', status_code=403)
 
-    def test_home_with_valid_token_carries_it_in_hidden_field(self):
+    def test_home_with_valid_token_issues_individual_ticket(self):
         token = services.issue_start_token()
         resp = self.client.get(reverse('game:home'), {'t': token})
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f'<input type="hidden" name="t" value="{token}">', html=True)
+        ticket = self.ticket()
+        self.assertContains(resp, ticket.code)
+        self.assertContains(resp, 'Use a computer for the best chance at a high score')
+        self.assertContains(resp, 'Quotes, pipes, brackets and other special characters')
+        self.assertContains(resp, 'Or continue here')
+        self.assertRegex(ticket.code, r'^[ACDEFHJKMNPQRTUVWXY3479]{5}$')
 
-    def test_start_without_or_with_expired_token_creates_no_game(self):
-        for data in ({'nick': 'neo'}, {'nick': 'neo', 't': self.expired_token()}, {'nick': 'neo', 't': 'junk'}):
-            resp = self.client.post(reverse('game:start'), data)
-            self.assertEqual(resp.status_code, 403)
+    def test_start_without_ticket_creates_no_game(self):
+        resp = self.client.post(reverse('game:start'), {'nick': 'neo'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'enter your game code first')
         self.assertEqual(GameSession.objects.count(), 0)
 
-    def test_token_expiring_between_scan_and_start_is_refused(self):
+    def test_ticket_remains_valid_after_qr_token_expires(self):
         token = services.issue_start_token()
+        self.client.get(reverse('game:home'), {'t': token})
         ttl = services.gate_settings().token_ttl_s
         later = timezone.now() + timedelta(seconds=ttl + 120)
         with mock.patch.object(timezone, 'now', return_value=later):
-            resp = self.client.post(reverse('game:start'), {'nick': 'neo', 't': token})
-        self.assertContains(resp, 'That code has expired.', status_code=403)
-        self.assertEqual(GameSession.objects.count(), 0)
+            resp = self.client.post(reverse('game:start'), {'nick': 'neo'})
+        self.assertRedirects(resp, reverse('game:play'))
+        self.assertEqual(GameSession.objects.count(), 1)
 
-    def test_nick_error_keeps_token(self):
-        token = services.issue_start_token()
-        resp = self.client.post(reverse('game:start'), {'nick': ' ', 't': token})
+    def test_nick_error_keeps_ticket(self):
+        self.client.get(reverse('game:home'), {'t': services.issue_start_token()})
+        ticket = self.ticket()
+        resp = self.client.post(reverse('game:start'), {'nick': ' '})
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'class="error"')
-        self.assertContains(resp, f'name="t" value="{token}"')
+        self.assertEqual(self.ticket().pk, ticket.pk)
 
     def test_player_with_game_resumes_without_token(self):
         self.start()
@@ -161,6 +184,72 @@ class GateTests(ViewTestCase):
         self.assertRedirects(self.client.post(reverse('game:start'), {'nick': 'x'}), reverse('game:play'))
         GameSession.objects.filter(pk=self.game().pk).update(current_slug=None, finished_at=timezone.now())
         self.assertRedirects(self.client.get(reverse('game:home')), reverse('game:done'))
+
+
+class ComputerHandoffTests(ViewTestCase):
+    def setUp(self):
+        super().setUp()
+        self.phone = self.client
+        self.computer = Client()
+        self.phone.get(reverse('game:home'), {'t': services.issue_start_token()})
+        self.ticket_obj = self.ticket(self.phone)
+
+    def test_refresh_reuses_same_ticket(self):
+        first = self.ticket_obj
+        self.phone.get(reverse('game:home'), {'t': services.issue_start_token()})
+        self.assertEqual(self.ticket(self.phone).pk, first.pk)
+        self.assertEqual(GameTicket.objects.count(), 1)
+
+    def test_computer_redeems_case_insensitive_code_and_sees_start_form(self):
+        code = f' {self.ticket_obj.code[:2].lower()} {self.ticket_obj.code[2:].lower()} '
+        resp = self.computer.post(reverse('game:join'), {'code': code}, follow=True)
+        self.assertContains(resp, 'name="nick"')
+        self.assertNotContains(resp, 'Use a computer for the best chance at a high score')
+        self.assertEqual(self.ticket(self.computer), self.ticket_obj)
+
+    def test_computer_start_updates_phone_and_phone_sees_finished_summary(self):
+        self.computer.post(reverse('game:join'), {'code': self.ticket_obj.code})
+        resp = self.computer.post(reverse('game:start'), {'nick': 'desktop'})
+        self.assertRedirects(resp, reverse('game:play'))
+        game = GameSession.objects.get(pk=self.computer.session['game_id'])
+        self.ticket_obj.refresh_from_db()
+        self.assertEqual(self.ticket_obj.game_id, game.pk)
+
+        self.assertEqual(self.phone.get(reverse('game:ticket_status')).json(), {'status': 'in_progress'})
+        phone_home = self.phone.get(reverse('game:home'))
+        self.assertContains(phone_home, 'Game in progress')
+        self.assertNotContains(phone_home, 'name="command"')
+        self.assertNotContains(phone_home, 'name="nick"')
+        self.assertNotIn('game_id', self.phone.session)
+
+        GameSession.objects.filter(pk=game.pk).update(finished_at=timezone.now())
+        self.assertEqual(self.phone.get(reverse('game:ticket_status')).json(), {'status': 'finished'})
+        summary = self.phone.get(reverse('game:done'))
+        self.assertContains(summary, 'desktop')
+        self.assertContains(summary, game.code)
+
+    def test_only_first_device_can_start_and_used_code_cannot_be_redeemed(self):
+        self.computer.post(reverse('game:join'), {'code': self.ticket_obj.code})
+        self.computer.post(reverse('game:start'), {'nick': 'desktop'})
+        loser = self.phone.post(reverse('game:start'), {'nick': 'phone'})
+        self.assertRedirects(loser, reverse('game:home'))
+        self.assertEqual(GameSession.objects.count(), 1)
+        self.assertEqual(GameSession.objects.get().nick, 'desktop')
+
+        third = Client()
+        resp = third.post(reverse('game:join'), {'code': self.ticket_obj.code})
+        self.assertContains(resp, 'not valid or has already been used')
+        self.assertNotIn(views.TICKET_SESSION_KEY, third.session)
+
+    def test_status_without_ticket_is_forbidden(self):
+        resp = Client().get(reverse('game:ticket_status'))
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {'status': 'no_ticket'})
+
+    @override_settings(PUBLIC_BASE_URL='https://play.example')
+    def test_phone_shows_configured_computer_url(self):
+        resp = self.phone.get(reverse('game:home'))
+        self.assertContains(resp, 'https://play.example/')
 
 
 class PlayTests(ViewTestCase):
@@ -316,7 +405,8 @@ class DockerDownTests(TestCase):
         reap = mock.patch.object(sandbox, 'reap_stale_once')
         reap.start()
         self.addCleanup(reap.stop)
-        self.client.post(reverse('game:start'), {'nick': 'neo', 't': services.issue_start_token()})
+        self.client.get(reverse('game:home'), {'t': services.issue_start_token()})
+        self.client.post(reverse('game:start'), {'nick': 'neo'})
 
     def test_daemon_unreachable_returns_json_503_and_is_not_counted(self):
         for exc in (docker.errors.DockerException('no socket'), requests.exceptions.ConnectionError('gone')):
@@ -387,9 +477,10 @@ class NoAnswerLinksTests(ViewTestCase):
     @override_settings(TRACKING_WEBSITE_ID=TRACKING_WEBSITE_ID)
     def test_start_error_pages_do_not_carry_tracking_script(self):
         token = services.issue_start_token()
+        self.client.get(reverse('game:home'), {'t': token})
         responses = (
-            self.client.post(reverse('game:start'), {'nick': ' ', 't': token}),
-            self.client.post(reverse('game:start'), {'nick': 'neo', 't': 'invalid'}),
+            self.client.post(reverse('game:start'), {'nick': ' '}),
+            Client().post(reverse('game:start'), {'nick': 'neo'}),
         )
         for resp in responses:
             self.assertNotIn(TRACKING_WEBSITE_ID, resp.content.decode())

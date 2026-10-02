@@ -1,0 +1,12 @@
+{% extends 'game/participant_base.html' %}
+{% load static %}
+{% block header %}{% include 'game/_logo.html' %}{% endblock %}
+{% block content %}
+<section class="handoff-status" data-status-url="{{ status_url }}" data-done-url="{{ done_url }}">
+  <span class="badge cyan">Game in progress</span>
+  <h1>Continue on your computer</h1>
+  <p>This page will show your result when the game ends.</p>
+  <p class="muted">Game code {{ ticket.code }}</p>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{% static 'game/ticket.js' %}"></script>{% endblock %}

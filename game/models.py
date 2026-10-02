@@ -10,6 +10,14 @@ def generate_code() -> str:
     return f'{secrets.randbelow(10**6):06d}'
 
 
+GAME_TICKET_ALPHABET = 'ACDEFHJKMNPQRTUVWXY3479'
+
+
+def generate_ticket_code() -> str:
+    """A readable five-character code that is never reassigned."""
+    return ''.join(secrets.choice(GAME_TICKET_ALPHABET) for _ in range(5))
+
+
 class GameSession(models.Model):
     """One player's game. Counters are denormalised for S-02 (time limit) and S-03 (ranking).
 
@@ -54,6 +62,20 @@ class GameSession(models.Model):
     def timed_out(self) -> bool:
         """The clock ended this game (it still has a current challenge)."""
         return self.finished_at is not None and self.current_slug is not None
+
+
+class GameTicket(models.Model):
+    """A permanent one-time credential issued after a valid booth QR scan."""
+
+    code = models.CharField(max_length=5, unique=True, editable=False, default=generate_ticket_code)
+    created_at = models.DateTimeField(auto_now_add=True)
+    game = models.OneToOneField(
+        GameSession, null=True, blank=True, editable=False, on_delete=models.PROTECT,
+        related_name='ticket',
+    )
+
+    def __str__(self):
+        return self.code
 
 
 class Attempt(models.Model):

@@ -28,7 +28,10 @@ from django.utils import timezone
 from challenges import catalog, sandbox
 from challenges.catalog import Challenge
 
-from .models import Attempt, GameSession, GameSettings, GateSettings, generate_code
+from .models import (
+    Attempt, GameSession, GameSettings, GameTicket, GateSettings, generate_code,
+    generate_ticket_code,
+)
 
 logger = logging.getLogger('game')
 
@@ -42,6 +45,8 @@ NICK_HTML_PATTERN = rf' *{NICK_RE.pattern} *'  # browser pattern: start_game tri
 NICK_CHARS_DESC = 'letters, digits, _ . + @'  # human-readable allowed set (for hints/errors)
 CODE_RE = re.compile(r'^\d{6}$')
 CODE_ATTEMPTS = 10
+TICKET_CODE_RE = re.compile(r'^[ACDEFHJKMNPQRTUVWXY3479]{5}$')
+TICKET_CODE_ATTEMPTS = 20
 CORRECT_ANSWER_BONUS_MAX_S = 3600
 
 # SubmitOutcome.status values. Only RAN is counted as an attempt.
@@ -98,6 +103,58 @@ def start_game(nick: str) -> GameSession:
                     nick=nick, current_slug=first.slug, started_at=now,
                     deadline_at=now + timedelta(seconds=settings.GAME_DURATION_S),
                     code=generate_code())
+        except IntegrityError:
+            continue
+    raise RuntimeError('could not allocate a unique prize code')
+
+
+def issue_game_ticket() -> GameTicket:
+    """Create a permanent ticket; code values are retained and never reused."""
+    for _ in range(TICKET_CODE_ATTEMPTS):
+        try:
+            with transaction.atomic():
+                return GameTicket.objects.create(code=generate_ticket_code())
+        except IntegrityError:
+            continue
+    raise RuntimeError('could not allocate a unique game ticket code')
+
+
+def normalize_ticket_code(raw: str) -> str | None:
+    code = ''.join((raw or '').split()).upper()
+    return code if TICKET_CODE_RE.fullmatch(code) else None
+
+
+def find_available_ticket(raw: str) -> GameTicket | None:
+    code = normalize_ticket_code(raw)
+    if code is None:
+        return None
+    return GameTicket.objects.filter(code=code, game__isnull=True).first()
+
+
+def start_game_with_ticket(ticket_id, nick: str) -> tuple[GameSession | None, GameTicket]:
+    """Atomically consume a ticket and start one game; the first concurrent Start wins."""
+    nick = nick.strip()
+    if not NICK_RE.fullmatch(nick):
+        raise ValueError(f'nick must be 1-{NICK_MAX_CHARS} characters: {NICK_CHARS_DESC}')
+
+    first = catalog.first_playable()
+    if first is None:
+        raise RuntimeError('no playable challenges')
+    now = timezone.now()
+    for _ in range(CODE_ATTEMPTS):
+        try:
+            with transaction.atomic():
+                ticket = GameTicket.objects.select_for_update().get(pk=ticket_id)
+                if ticket.game_id is not None:
+                    return None, ticket
+                game = GameSession.objects.create(
+                    nick=nick, current_slug=first.slug, started_at=now,
+                    deadline_at=now + timedelta(seconds=settings.GAME_DURATION_S),
+                    code=generate_code(),
+                )
+                ticket.game = game
+                ticket.save(update_fields=['game'])
+                return game, ticket
         except IntegrityError:
             continue
     raise RuntimeError('could not allocate a unique prize code')
@@ -419,6 +476,13 @@ def check_start_token(token, now=None) -> str:
 
 def start_url(request, token: str) -> str:
     path = f'{reverse("game:home")}?t={quote(token)}'
+    if settings.PUBLIC_BASE_URL:
+        return f'{settings.PUBLIC_BASE_URL}{path}'
+    return request.build_absolute_uri(path)
+
+
+def computer_url(request) -> str:
+    path = reverse('game:home')
     if settings.PUBLIC_BASE_URL:
         return f'{settings.PUBLIC_BASE_URL}{path}'
     return request.build_absolute_uri(path)
