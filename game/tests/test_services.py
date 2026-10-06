@@ -10,7 +10,7 @@ from django.utils import timezone
 from challenges import catalog, sandbox
 from challenges.tests.fakes import write_excluded
 from game import services
-from game.models import Attempt, GameSession, GameSettings, GateSettings
+from game.models import Attempt, GameSession, GameSettings, GameTicket, GateSettings
 from game.tests.fakes import result
 
 
@@ -90,6 +90,45 @@ class PrizeCodeTests(ServiceTestCase):
         now = timezone.now()
         with self.assertRaises(IntegrityError):
             GameSession.objects.create(nick='b', deadline_at=now, code=first.code)
+
+
+class GameTicketTests(ServiceTestCase):
+    def test_issued_code_uses_only_unambiguous_alphabet(self):
+        for _ in range(20):
+            ticket = services.issue_game_ticket()
+            self.assertRegex(ticket.code, r'^[ACDEFHJKMNPQRTUVWXY3479]{5}$')
+            self.assertFalse(set(ticket.code) & set('O0I1LB8G6S5Z2'))
+
+    def test_normalization_is_case_insensitive_and_ignores_spaces(self):
+        ticket = GameTicket.objects.create(code='ACD39')
+        self.assertEqual(services.normalize_ticket_code(' acd 39 '), ticket.code)
+        self.assertEqual(services.find_available_ticket('acd39'), ticket)
+        for bad in ('', 'ACD3', 'ACD399', 'ACDI9', 'ACDL9', 'ACD09', 'ACD-9'):
+            self.assertIsNone(services.normalize_ticket_code(bad))
+
+    def test_code_collision_is_retried_and_used_codes_are_retained(self):
+        GameTicket.objects.create(code='ACD39')
+        with mock.patch.object(services, 'generate_ticket_code', side_effect=['ACD39', 'FHJ47']):
+            ticket = services.issue_game_ticket()
+        self.assertEqual(ticket.code, 'FHJ47')
+        self.assertEqual(GameTicket.objects.count(), 2)
+
+    def test_start_consumes_ticket_once_and_links_game(self):
+        ticket = services.issue_game_ticket()
+        game, claimed = services.start_game_with_ticket(ticket.pk, ' neo ')
+        self.assertEqual(game.nick, 'neo')
+        self.assertEqual(claimed.game_id, game.pk)
+        again, claimed = services.start_game_with_ticket(ticket.pk, 'other')
+        self.assertIsNone(again)
+        self.assertEqual(claimed.game_id, game.pk)
+        self.assertEqual(GameSession.objects.count(), 1)
+
+    def test_invalid_nick_does_not_consume_ticket(self):
+        ticket = services.issue_game_ticket()
+        with self.assertRaises(ValueError):
+            services.start_game_with_ticket(ticket.pk, 'bad nick')
+        ticket.refresh_from_db()
+        self.assertIsNone(ticket.game_id)
 
 
 class RankingFixtureMixin(ServiceTestCase):

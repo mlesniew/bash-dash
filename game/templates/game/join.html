@@ -1,0 +1,17 @@
+{% extends 'game/participant_base.html' %}
+{% block header %}{% include 'game/_logo.html' %}{% endblock %}
+{% block content %}
+<section class="rules">
+  <h1>Continue on this computer</h1>
+  <p class="help">Enter the {{ ticket_length }}-character game code shown on your phone.</p>
+</section>
+<form method="post" action="{% url 'game:join' %}" class="start">
+  {% csrf_token %}
+  <label for="code">Game code</label>
+  <input id="code" class="code-input" name="code" type="text" maxlength="{{ gate_digits }}" required
+         autocapitalize="characters" autocorrect="off" autocomplete="off" spellcheck="false" autofocus>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <button type="submit">Continue</button>
+</form>
+<p class="muted">At the booth without a camera? You can also enter the {{ gate_digits }}-digit code shown under the QR.</p>
+{% endblock %}

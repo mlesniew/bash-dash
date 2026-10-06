@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from .models import Attempt, GameSession
+from .models import Attempt, GameSession, GameTicket
 
 
 class ReadOnlyMixin:
@@ -30,3 +30,9 @@ class GameSessionAdmin(ReadOnlyMixin, admin.ModelAdmin):
     list_filter = (('prize_given_at', admin.EmptyFieldListFilter), ('hidden_at', admin.EmptyFieldListFilter))
     search_fields = ('nick', 'code')
     inlines = [AttemptInline]
+
+
+@admin.register(GameTicket)
+class GameTicketAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    list_display = ('code', 'created_at', 'game')
+    search_fields = ('code', 'game__nick', 'game__code')

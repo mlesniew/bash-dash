@@ -1,7 +1,18 @@
 {% extends 'game/participant_base.html' %}
-{% load game_text %}
+{% load static game_text %}
 {% block header %}{% include 'game/_logo.html' %}{% endblock %}
 {% block content %}
+{% if show_handoff %}
+<section class="handoff" data-status-url="{{ ticket_status_url }}" data-done-url="{% url 'game:done' %}">
+  <span class="badge cyan">Recommended</span>
+  <h1>Use a computer for the best chance at a high score</h1>
+  <p>You'll be typing Bash commands under time pressure. Quotes, pipes, brackets and other special characters are much easier to enter on a computer.</p>
+  <p>Open <strong>{{ computer_url }}</strong> and enter this game code:</p>
+  <p class="game-code">{{ ticket.code }}</p>
+  <p class="muted">This code does not expire. Keep this page open; we'll show your result here when the game ends.</p>
+</section>
+<p class="mobile-option"><span>Or continue here</span></p>
+{% endif %}
 <section class="rules">
   <h1 class="rule"><span class="badge cyan">How to play</span></h1>
   <ul>
@@ -15,7 +26,6 @@
 </section>
 <form method="post" action="{% url 'game:start' %}" class="start">
   {% csrf_token %}
-  <input type="hidden" name="t" value="{{ token }}">
   <label for="nick">Your nick</label>
   <p id="nick-hint" class="hint">{{ nick_desc }} · max {{ nick_max }}</p>
   <input id="nick" name="nick" type="text" maxlength="{{ nick_max }}" pattern="{{ nick_pattern }}"
@@ -26,3 +36,4 @@
   <button type="submit" class="start-button">Start ▸</button>
 </form>
 {% endblock %}
+{% block scripts %}{% if show_handoff %}<script src="{% static 'game/ticket.js' %}"></script>{% endif %}{% endblock %}

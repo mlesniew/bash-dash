@@ -77,21 +77,24 @@ w Hall of fame. Firma (rekrutacja) jest beneficjentem, a nie bezpośrednim użyt
 - Komenda wysłana po upływie 5 minut nie jest liczona.
 - Po zakończeniu gry wynik gracza pojawia się w Hall of fame (o ile mieści się w top N i nick nie
   jest ukryty).
-- Skan kodu QR starszego niż ustawiony czas ważności (domyślnie ok. 15 minut) nie pozwala
-  rozpocząć gry.
+- Skan kodu QR starszego niż ustawiony czas ważności (domyślnie ok. 15 minut) nie wystawia
+  indywidualnego kodu gry.
 
 ## Functional Requirements
 
 Numeracja jest stabilna. FR-009, FR-014 i FR-015 usunięto w rundzie sokratejskiej (patrz niżej).
 
 ### Wejście
-- FR-001: Gracz może rozpocząć grę tylko z ważnym tokenem z kodu QR wyświetlanego przy stoisku. Czas ważności tokenu (domyślnie ok. 15 min) ustawia obsługa, a wartość 0 oznacza, że token nie wygasa. Priority: must-have
+- FR-001: Gracz może otrzymać indywidualny kod gry tylko z ważnym tokenem z kodu QR wyświetlanego przy stoisku. Czas ważności tokenu (domyślnie ok. 15 min) ustawia obsługa, a wartość 0 oznacza, że token nie wygasa. Priority: must-have
   > Socrates: Kontrargument: „ekran przy stoisku to punkt awarii; gdy padnie, nikt nie zacznie
   > gry”. Rozstrzygnięcie: konfigurowalny czas ważności. Ustawienie 0 wyłącza wygasanie
   > i działa jako fallback.
 - FR-002: Gracz może przeczytać zasady i podać nick przed startem. Priority: must-have
   > Socrates: Kontrargument: „obraźliwe nicki trafiają prosto na ekran”. Rozstrzygnięcie:
   > wystarczy moderacja reaktywna (FR-012), bez filtra ani akceptacji z góry.
+- FR-019: Po wejściu z QR gracz otrzymuje trwały, jednorazowy kod gry, który może wpisać na
+  komputerze. Pierwszy Start na telefonie albo komputerze atomowo zużywa kod i tworzy jedną
+  sesję; telefon pozostaje podglądem i po zakończeniu pokazuje podsumowanie. Priority: must-have
 
 ### Rozgrywka
 - FR-003: Gracz może rozwiązywać zadania z zestawu głównego w stałej kolejności, bez pomijania. Priority: must-have
@@ -185,14 +188,17 @@ Trzy role, bez kont użytkowników:
 
 | Rola | Jak wchodzi | Co może |
 |---|---|---|
-| **Gracz** (uczestnik) | Skanuje kod QR wyświetlany na ekranie przy stoisku. Adres zawiera krótko ważny token (ok. 15 min). Podaje nick (wymagany, nieunikalny). E-maila nie zbieramy. | Rozpocząć sesję gry, wysyłać komendy, zobaczyć podsumowanie i swój 6-cyfrowy kod. |
+| **Gracz** (uczestnik) | Skanuje kod QR wyświetlany na ekranie przy stoisku. Adres zawiera krótko ważny token (ok. 15 min), który wystawia trwały 5-znakowy kod gry. Podaje nick (wymagany, nieunikalny). E-maila nie zbieramy. | Rozpocząć sesję na telefonie albo przenieść Start na komputer, wysyłać komendy z urządzenia, które rozpoczęło grę, zobaczyć podsumowanie i swój 6-cyfrowy kod. |
 | **Obsługa stoiska** | Logowanie hasłem. | Oglądać Hall of fame razem z aktualnym kodem QR (widok na ekran przy stoisku), ustawiać czas ważności tokenu i bonus czasu za poprawną odpowiedź, wyszukiwać po kodzie, ukrywać nicki (dyskwalifikacja), oznaczać wydanie nagrody. |
 
 - Nie ma publicznego rankingu. Hall of fame razem z QR widzi tylko zalogowana obsługa, która
   wyświetla go na ekranie przy stoisku.
-- Token w kodzie QR pozwala **rozpocząć** grę tylko przez ok. 15 minut od wygenerowania. Grę mogą
-  więc zacząć osoby fizycznie przy stoisku, a nie z domu. Sesja rozpoczęta w oknie ważności trwa
-  pełne 5 minut, nawet jeśli token w tym czasie wygaśnie.
+- Token w kodzie QR pozwala przez ok. 15 minut **pobrać indywidualny kod gry**. Kod jest wydawany
+  osobom fizycznie przy stoisku, ale sama gra może rozpocząć się później, także poza stoiskiem.
+  Sesja zaczyna swój limit czasu dopiero po kliknięciu Start.
+- Indywidualny kod gry nie wygasa. Składa się z 5 znaków, nie rozróżnia wielkości liter i pomija
+  znaki mylące się wizualnie (`O/0`, `I/1/L`, `B/8`, `G/6`, `S/5`, `Z/2`). Raz użyta wartość
+  nigdy nie wraca do puli.
 - Wejście z wygasłym tokenem albo bez tokenu kończy się odmową z informacją „zeskanuj kod przy
   stoisku”, a nie ekranem startowym.
 - Identyfikacja gracza przy odbiorze nagrody odbywa się wyłącznie po 6-cyfrowym kodzie.

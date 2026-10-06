@@ -195,6 +195,20 @@ button:disabled, input:disabled { opacity: 0.6; }
 .start .hint { margin: 0; font-size: 0.85rem; color: var(--muted); }
 .start-button { min-height: 52px; }
 
+.handoff { border: 1.5px solid var(--cyan); border-radius: 14px; padding: 16px; margin-bottom: 24px; text-align: center; }
+.handoff h1, .handoff-status h1 { color: var(--cyan); }
+.handoff .game-code {
+  margin: 10px 0;
+  color: var(--yellow);
+  font-size: clamp(2.5rem, 16vw, 4.5rem);
+  font-weight: bold;
+  letter-spacing: 0.18em;
+  user-select: all;
+}
+.handoff-status { margin-top: 20vh; text-align: center; }
+.mobile-option { display: flex; align-items: center; gap: 12px; color: var(--pink); font-weight: bold; }
+.mobile-option::before, .mobile-option::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+
 .error { color: var(--red-text); margin: 0; }
 
 .counters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }

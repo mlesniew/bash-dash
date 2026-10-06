@@ -17,12 +17,22 @@ aplikacja. Na Apple Silicon / ARM ustaw `BUILD_PLATFORM=linux/arm64` w `.env`.
 
 Adresy (port z `BASHDASH_PORT`, domyślnie 8000):
 
-- `/` — gra (start wymaga tokenu z QR albo 6-cyfrowego kodu spod QR),
+- `/` — wpisanie 5-znakowego kodu gry na komputerze; skan QR wystawia taki jednorazowy kod,
+  ale grę można też rozpocząć bezpośrednio na telefonie,
 - `/staff/hall` — ekran rankingu z QR (otwórz go pod adresem z `BASHDASH_PUBLIC_URL`),
 - `/staff` — wyszukiwanie kodu nagrody i link do konfiguracji gry,
 - `/staff/moderate` — moderacja rankingu i ustawienia: ważność kodu QR oraz bonus czasu za poprawną
   odpowiedź (domyślnie 15 s; 0 wyłącza bonus),
 - `/admin/` — panel Django.
+
+### Przeniesienie gry na komputer
+
+Po zeskanowaniu QR telefon pokazuje trwały, indywidualny kod z 5 niejednoznacznych znaków.
+Uczestnik może wpisać go na `/` na komputerze albo od razu podać nick i grać na telefonie.
+Kod nie wygasa, ale pierwszy Start zużywa go na stałe i tworzy dokładnie jedną grę. Jeśli gra
+ruszyła na komputerze, telefon pokazuje jej status, a po zakończeniu wynik i kod nagrody.
+
+Osoba bez możliwości skanowania może na `/` wpisać również 6-cyfrowy kod wyświetlany pod QR.
 
 Koledzy z sieci biurowej łączą się pod `http://<IP-hosta>:8000`; jeśli host ma firewall, otwórz ten port.
 
